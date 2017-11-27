@@ -10,7 +10,7 @@ const int TYPE_INPUT = 0;
 const int TYPE_HIDDEN = 1;
 const int TYPE_OUTPUT = 2;
 const fp learning_rate = 0.5;
-const int output_num = 2;
+const int output_num = 3;
 const int hidden_num = 3;
 const int hidden_layers = 1;
 const int input_num = 2;
@@ -123,8 +123,8 @@ void print() {
 }
 
 void train(const fp input[], fp target[]) {
-    pool[i[0]].utop.first = input[0];
-    pool[i[1]].utop.first = input[1];
+    for (int ii = 0; ii < input_num; ii++)
+        pool[i[ii]].utop.first = input[ii];
     for (int it = 0; it < 1000; it++) {
         update_value();
         fp total_error = 0;
@@ -135,16 +135,17 @@ void train(const fp input[], fp target[]) {
         // printf("it#%d error: %f\n", it, total_error);
         if (total_error < 1e-6)
             break;
-        pool[o[0]].utop.second = - (target[0] - pool[o[0]].utop.first) / 2;
-        pool[o[1]].utop.second = - (target[1] - pool[o[1]].utop.first) / 2;
-        for (int i = top-1; i >= 0; i--) {
+        for (int oo = 0; oo < output_num; oo++)
+            pool[o[oo]].utop.second = -(target[oo] - pool[o[oo]].utop.first) / 2;
+
+        for (int i = top - 1; i >= 0; i--) {
             if (pool[i].type != TYPE_INPUT) {
                 pool[i].backward();
             }
         }
-        for (int i = top-1; i >= 0; i--) {
+        for (int i = top - 1; i >= 0; i--) {
             if (pool[i].type != TYPE_INPUT) {
-                for (int j = 0;j < pool[i].edge_from;j++) {
+                for (int j = 0; j < pool[i].edge_from; j++) {
                     pool[i].weight[j].first -= learning_rate * pool[i].weight[j].second;
                 }
                 pool[i].bias.first -= learning_rate * pool[i].bias.second;
@@ -203,13 +204,14 @@ int main() {
 
     fp input[input_num];
     fp output[output_num];
-    for (int c = 0;c < 100;c++) {
+    for (int c = 0; c < 100; c++) {
         for (int i = 0; i < 2; i++) {
             for (int j = 0; j < 2; j++) {
                 input[0] = (fp) i;
                 input[1] = (fp) j;
                 output[0] = (fp) (i ^ j);
                 output[1] = (fp) (i & j);
+                output[2] = (fp) (i | j);
                 train(input, output);
             }
         }
@@ -223,8 +225,9 @@ int main() {
         pool[i[0]].utop.first = a;
         pool[i[1]].utop.first = b;
         update_value();
-        printf("answer: a^b=%d a&b=%d\n", pool[o[0]].utop.first > 0.5, pool[o[1]].utop.first > 0.5);
-        input[0] = a, input[1] = b, output[0] = a^b, output[1] = a&b;
+        printf("answer: a^b=%d a&b=%d a|b=%d\n", pool[o[0]].utop.first > 0.5, pool[o[1]].utop.first > 0.5,
+               pool[o[2]].utop.first > 0.5);
+        input[0] = a, input[1] = b, output[0] = a ^ b, output[1] = a & b, output[2] = a | b;
         // train(input, output);
         //   pool[i[0]].out = a;
         //   pool[i[1]].out = b;
