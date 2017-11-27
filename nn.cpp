@@ -11,7 +11,7 @@ const int TYPE_HIDDEN = 1;
 const int TYPE_OUTPUT = 2;
 const fp learning_rate = 0.5;
 const int output_num = 2;
-const int hidden_num = 2;
+const int hidden_num = 3;
 const int hidden_layers = 1;
 const int input_num = 2;
 
