@@ -3,17 +3,19 @@
 #include <math.h>
 #include <time.h>
 #include <fstream>
+#include <random>
 
 typedef float fp;
 const int MAX_EDGE = 20;
 const int TYPE_INPUT = 0;
 const int TYPE_HIDDEN = 1;
 const int TYPE_OUTPUT = 2;
-const fp learning_rate = 0.5;
+const fp learning_rate = 0.1;
 const int output_num = 3;
-const int hidden_num = 3;
-const int hidden_layers = 1;
+const int hidden_num = 4;
+const int hidden_layers = 3;
 const int input_num = 2;
+const fp xavier_coef = sqrtf(6.0f / (input_num + output_num));
 
 int i[input_num], h[hidden_num * hidden_layers], o[output_num];
 
@@ -28,28 +30,72 @@ public:
     int to[MAX_EDGE];
     int edge_to;
     unit utop;
+    unit weight[MAX_EDGE];
+    unit bias;
+    void forward();
+    void backward();
+
+protected:
+    virtual fp activate(fp i) = 0;
+    virtual fp d_activate(fp o) = 0;
 };
 
 class SigmoidNode : public Node {
-public:
-    unit weight[MAX_EDGE];
-    unit bias;
-
-    void forward();
-
-    void backward();
+protected:
+    fp activate(fp i) override;
+    fp d_activate(fp o) override;
 };
 
+class LeakyReLUNode : public Node {
+protected:
+    fp activate(fp i) override;
+    fp d_activate(fp o) override;
+};
 
-SigmoidNode pool[100];
-int top = 0;
+class SoftplusNode : public Node {
+protected:
+    fp activate(fp i) override;
+    fp d_activate(fp o) override;
+};
 
 fp sigmoid(fp input) {
     return 1 / (1 + exp(-input));
 }
 
+fp SigmoidNode::activate(fp i) {
+    return sigmoid(i);
+}
 
-void SigmoidNode::forward() {
+fp SigmoidNode::d_activate(fp o) {
+    return o * (1 - o);
+}
+
+const fp lambda = 0.3;
+
+fp LeakyReLUNode::activate(fp i) {
+    return i > 0 ? i : lambda*i;
+}
+
+fp LeakyReLUNode::d_activate(fp o) {
+    return o > 0 ? 1 : lambda;
+}
+
+// y = log(1+exp(x))
+// y' = exp(x)/(1+exp(x)) = 1 - exp(-y)
+fp SoftplusNode::activate(fp i) {
+    return log(1+exp(i));
+}
+
+fp SoftplusNode::d_activate(fp o) {
+    return fp(1.0)-expf(-o);
+}
+
+LeakyReLUNode pool[100];
+int top = 0;
+std::mt19937 rng;
+std::uniform_real_distribution<fp> dist(-xavier_coef, xavier_coef);
+
+void Node::forward() {
     fp net = 0;
     for (int j = 0; j < edge_from; j++) {
         net += pool[from[j]].utop.first * weight[j].first;
@@ -57,15 +103,16 @@ void SigmoidNode::forward() {
     }
     net = net + bias.first;
     bias.second = 0.0;
-    utop = unit(sigmoid(net), 0.0);
+    utop = unit(activate(net), 0.0);
 }
 
-void SigmoidNode::backward() {
+void Node::backward() {
+    fp d = d_activate(utop.first);
     for (int j = 0; j < edge_from; j++) {
-        weight[j].second += pool[from[j]].utop.first * utop.first * (1 - utop.first) * utop.second;
-        pool[from[j]].utop.second += weight[j].first * utop.first * (1 - utop.first) * utop.second;
+        weight[j].second += pool[from[j]].utop.first * d * utop.second;
+        pool[from[j]].utop.second += weight[j].first * d * utop.second;
     }
-    bias.second += utop.first * (1 - utop.first) * utop.second;
+    bias.second += d * utop.second;
 }
 
 fp sqr(fp input) {
@@ -73,24 +120,27 @@ fp sqr(fp input) {
 }
 
 int create_node(int type) {
-    SigmoidNode &new_node = pool[top++];
+    // Xavier init
+    fp temp = sqrtf(6.0f / (input_num + output_num));
+    std::uniform_real_distribution<fp> dist(-temp, temp);
+    Node &new_node = pool[top++];
     new_node.type = type;
-    new_node.bias = unit((fp) rand() / RAND_MAX, 0.0);
+    new_node.bias = unit(dist(rng), 0.0);
     new_node.edge_from = new_node.edge_to = 0;
     return top - 1;
 }
 
 void add_edge(int from, int to) {
-    SigmoidNode &edge1 = pool[from];
-    SigmoidNode &edge2 = pool[to];
+    Node &edge1 = pool[from];
+    Node &edge2 = pool[to];
     edge1.to[edge1.edge_to++] = to;
     edge2.from[edge2.edge_from++] = from;
-    edge2.weight[edge2.edge_from - 1] = unit((fp) rand() / RAND_MAX, 0.0);
+    edge2.weight[edge2.edge_from - 1] = unit(dist(rng), 0.0);
 }
 
 void update_value() {
     for (int i = 0; i < top; i++) {
-        SigmoidNode &cur = pool[i];
+        Node &cur = pool[i];
         if (cur.type != TYPE_INPUT) {
             cur.forward();
         }
@@ -117,7 +167,8 @@ void print() {
  << std::endl;
             }
         }
-        out << i << " [label=\"type: " << pool[i].type << " w: " << pool[i].utop.first << "\"]" << std::endl;
+        out << i << " [label=\"type: " << pool[i].type << " w: " << pool[i].utop.first << " bias: "
+            << pool[i].bias.first << "\"]" << std::endl;
     }
     out << "}" << std::endl;
 }
@@ -125,7 +176,7 @@ void print() {
 void train(const fp input[], fp target[]) {
     for (int ii = 0; ii < input_num; ii++)
         pool[i[ii]].utop.first = input[ii];
-    for (int it = 0; it < 1000; it++) {
+    for (int it = 0; it < 10000; it++) {
         update_value();
         fp total_error = 0;
         for (int i = 0; i < output_num; i++) {
@@ -136,7 +187,7 @@ void train(const fp input[], fp target[]) {
         if (total_error < 1e-6)
             break;
         for (int oo = 0; oo < output_num; oo++)
-            pool[o[oo]].utop.second = -(target[oo] - pool[o[oo]].utop.first) / 2;
+            pool[o[oo]].utop.second = (target[oo] - pool[o[oo]].utop.first);
 
         for (int i = top - 1; i >= 0; i--) {
             if (pool[i].type != TYPE_INPUT) {
@@ -146,9 +197,9 @@ void train(const fp input[], fp target[]) {
         for (int i = top - 1; i >= 0; i--) {
             if (pool[i].type != TYPE_INPUT) {
                 for (int j = 0; j < pool[i].edge_from; j++) {
-                    pool[i].weight[j].first -= learning_rate * pool[i].weight[j].second;
+                    pool[i].weight[j].first += learning_rate * pool[i].weight[j].second;
                 }
-                pool[i].bias.first -= learning_rate * pool[i].bias.second;
+                pool[i].bias.first += learning_rate * pool[i].bias.second;
             }
         }
         /*
@@ -176,7 +227,8 @@ void train(const fp input[], fp target[]) {
 }
 
 int main() {
-    srand(time(0));
+    std::random_device rd;
+    rng.seed(rd());
     create_nodes(input_num, TYPE_INPUT, i);
     create_nodes(hidden_num * hidden_layers, TYPE_HIDDEN, h);
     create_nodes(output_num, TYPE_OUTPUT, o);
